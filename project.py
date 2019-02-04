@@ -14,12 +14,12 @@ from sklearn.preprocessing import FunctionTransformer
 from sklearn.base import TransformerMixin
 
 from sklearn.cluster import MiniBatchKMeans
-# from sklearn.decomposition import dict_learning_online
 from sklearn.metrics import mean_squared_error
 
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import cross_val_score
 
 # df_fhv = pd.read_csv("./fhv_tripdata_2015-09.csv")
 df_green_raw = pd.read_csv("./green_tripdata_2015-09.csv")
@@ -58,15 +58,15 @@ df_green_raw = pd.read_csv("./green_tripdata_2015-09.csv")
 
 # Center of NYC is 40.7831° N, 73.9712° W
 
-n_jobs = 4
-geoScaleFactor = 100
-n_clusters = 100
+n_jobs = -1
+geoScaleFactor = 10
+n_clusters = 200
 
 df_green = (df_green_raw.pipe(lambda x: x[x.Tip_amount >= 0][x.Total_amount >= 0])
             .pipe(lambda x: x[x.Payment_type != 2])
             .pipe(lambda x: x.rename(columns={'Trip_type ': 'Trip_type'}))
-            .pipe(lambda x: x[x.Trip_type.isna() == False])
-            .pipe(lambda x: x.assign(Store_and_fwd_flag=x.Store_and_fwd_flag.eq('Y').mul(1))))
+            .pipe(lambda x: x[-x.Trip_type.isna()])
+            .pipe(lambda x: x.assign(Store_and_fwd_flag=x.Store_and_fwd_flag.eq('Y').mul(1))))  # need to check this
 
 df_green[['Pickup_longitude_center', 'Dropoff_longitude_center']] = (
     df_green[['Pickup_longitude', 'Dropoff_longitude']] + 73.9712)*geoScaleFactor
@@ -116,16 +116,11 @@ class my_cluster_transformer(TransformerMixin):
         pass
 
     def transform(self, X, *_):
-        cluster = MiniBatchKMeans(n_clusters=n_clusters).fit(X[cluster_features])
-        print(cluster.labels_)
-        return(cluster.labels_)
+        cluster = MiniBatchKMeans(n_clusters=n_clusters, random_state=0).fit(X[cluster_features])
+        return(cluster.labels_.reshape(-1, 1))
 
     def fit(self, *_):
         return self
-
-# def my_cluster_transformer(x):
-#     cluster = KMeans(n_clusters=n_clusters, n_jobs=n_jobs).fit(x)
-#     return(cluster.labels_)
 
 
 cluster_features = ['Pickup_longitude_center', 'Pickup_latitude_center',
@@ -135,13 +130,6 @@ cluster_transformer = Pipeline(steps=[
     ('clustering', my_cluster_transformer()),
     ('onehot', OneHotEncoder(categories='auto'))
 ])
-
-# cluster = KMeans(n_clusters=n_clusters, n_jobs=n_jobs).fit(
-#     df_train[['Pickup_longitude_center', 'Pickup_latitude_center',
-#               'Trip_dayofweek_x', 'Trip_dayofweek_y',
-#               'Trip_timeofday_x', 'Trip_timeofday_y']])
-# df_train['cluster_labels'] = cluster.labels_
-
 
 # maybe remove Extra, MTA_tax (needs to be changed to binary), improvement_surcharge, Tolls_amount
 cat_features = ['Trip_dayofweek', 'Trip_day', 'VendorID', 'RateCodeID', 'Store_and_fwd_flag',
@@ -153,12 +141,6 @@ cat_transformer = Pipeline(steps=[
     ('onehot', OneHotEncoder(categories='auto'))
 ])
 
-# cluster_features = ['cluster_labels']
-# cluster_transformer = Pipeline(steps=[
-#     # ('dictionary', FeatureHasher(n_features=100, input_type='string'))
-#     ('onehot', OneHotEncoder(categories='auto'))
-# ])
-
 num_features = ['Pickup_longitude_center', 'Pickup_latitude_center',
                 'Dropoff_longitude_center', 'Dropoff_latitude_center',
                 'Passenger_count', 'Trip_distance']
@@ -169,31 +151,84 @@ num_transformer = Pipeline(steps=[
 
 preprocessor = ColumnTransformer(transformers=[
     ('num', num_transformer, num_features),
-    ('cat', cat_transformer, cat_features),
-    ('cluster', cluster_transformer, cluster_features)
+    ('cat', cat_transformer, cat_features)
+    # ('cluster', cluster_transformer, cluster_features)
 ])
 
-estimator = GradientBoostingRegressor(n_estimators=100, verbose=10)
-# 4.61 RMSE for Fare_amount with only num
-# 4.26 RMSE for Fare_amount with num, cat
+estimator = GradientBoostingRegressor(n_estimators=500, verbose=10, max_depth=15,
+                                      max_features='sqrt', min_samples_split=1000,
+                                      min_samples_leaf=50, learning_rate=0.1, random_state=0)
+# 4.61 RMSE for Fare_amount with num
+# 3.69 RMSE for Fare_amount with num, cat
+# 3.81 RMSE for Fare_amount with num, cat, clust
 
-# estimator = RandomForestRegressor(n_estimators=70, n_jobs=n_jobs, verbose=10, random_state=0)
-# 1.98 RMSE for Fare_amount with only num
-
+# estimator = RandomForestRegressor(n_estimators=10, n_jobs=n_jobs, verbose=10, random_state=0)
+# 1.98 RMSE for Fare_amount with num
+# 1.74 RMSE for Fare_amount with num, cat
+# 1.81 RMSE for Fare_amount with num, cat, clust
 
 pipeline = Pipeline([
     ('preprocessor', preprocessor),
-    # ('pca', TruncatedSVD()),  # PCA()
+    # ('TruncatedSVD', TruncatedSVD()),  # PCA()
+    # ('PCA', PCA()),
     ('estimator', estimator)
 ])
-pipeline.fit(df_train, y_train)
-prediction = pipeline.predict(df_train)
-print(math.sqrt(mean_squared_error(y_train, prediction)))
+# print(cross_val_score(df_train, y_train, n_jobs=n_jobs, cv=5, verbose=10))
+
 
 # Hyperparameter Tuning
-# param_test1 = {'n_estimators': [10, 50, 100]}
-# gsearch1 = GridSearchCV(
-#     estimator=estimator,
-#     param_grid=param_test1, n_jobs=n_jobs, cv=5)
-# gsearch1.fit(df_train, y_train)
-# print(gsearch1.results_)
+param_test = {'n_estimators': [10, 50, 100], 'max_features': [.3, .6, 1]}
+gsearch = GridSearchCV(estimator=estimator, param_grid=param_test, n_jobs=n_jobs, cv=5, verbose=10)
+gsearch.fit(df_train, y_train)
+print("best_params: ", gsearch.best_params_)
+print("best_score: ", gsearch.best_score_)
+
+
+# Plotting
+BB = (-74.3, -73.7, 40.5, 40.9)
+nyc_map = plt.imread('https://aiblog.nl/download/nyc_-74.3_-73.7_40.5_40.9.png')
+
+
+def distance(lat1, lon1, lat2, lon2):
+    p = 0.017453292519943295
+    a = 0.5 - np.cos((lat2 - lat1) * p)/2 + np.cos(lat1 * p) * np.cos(lat2 * p) * (1 - np.cos((lon2 - lon1) * p)) / 2
+    return 0.6213712 * 12742 * np.arcsin(np.sqrt(a))
+
+
+n_lon, n_lat = 200, 200
+bins_lon = np.zeros(n_lon+1)
+bins_lat = np.zeros(n_lat+1)
+delta_lon = (BB[1]-BB[0]) / n_lon
+delta_lat = (BB[3]-BB[2]) / n_lat
+bin_width_miles = distance(BB[2], BB[1], BB[2], BB[0]) / n_lon
+bin_height_miles = distance(BB[3], BB[0], BB[2], BB[0]) / n_lat
+for i in range(n_lon+1):
+    bins_lon[i] = BB[0] + i * delta_lon
+for j in range(n_lat+1):
+    bins_lat[j] = BB[2] + j * delta_lat
+
+inds_pickup_lon = np.digitize(df_green.Pickup_longitude, bins_lon)
+inds_pickup_lat = np.digitize(df_green.Pickup_latitude, bins_lat)
+inds_dropoff_lon = np.digitize(df_green.Dropoff_longitude, bins_lon)
+inds_dropoff_lat = np.digitize(df_green.Dropoff_latitude, bins_lat)
+
+density_pickup, density_dropoff = np.zeros((n_lat, n_lon)), np.zeros((n_lat, n_lon))
+dxdy = bin_width_miles * bin_height_miles
+for i in range(n_lon):
+    for j in range(n_lat):
+        density_pickup[j, i] = np.sum((inds_pickup_lon == i+1) & (inds_pickup_lat == (n_lat-j))) / dxdy
+        density_dropoff[j, i] = np.sum((inds_dropoff_lon == i+1) & (inds_dropoff_lat == (n_lat-j))) / dxdy
+
+fig, axs = plt.subplots(2, 1, figsize=(18, 24))
+axs[0].imshow(nyc_map, zorder=0, extent=BB)
+im = axs[0].imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+axs[0].set_title('Pickup density [datapoints per sq mile]')
+cbar = fig.colorbar(im, ax=axs[0])
+cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+
+axs[1].imshow(nyc_map, zorder=0, extent=BB)
+im = axs[1].imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+axs[1].set_title('Dropoff density [datapoints per sq mile]')
+cbar = fig.colorbar(im, ax=axs[1])
+cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+plt.show()
