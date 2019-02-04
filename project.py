@@ -219,16 +219,18 @@ for i in range(n_lon):
         density_pickup[j, i] = np.sum((inds_pickup_lon == i+1) & (inds_pickup_lat == (n_lat-j))) / dxdy
         density_dropoff[j, i] = np.sum((inds_dropoff_lon == i+1) & (inds_dropoff_lat == (n_lat-j))) / dxdy
 
-fig, axs = plt.subplots(2, 1, figsize=(18, 24))
-axs[0].imshow(nyc_map, zorder=0, extent=BB)
-im = axs[0].imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
-axs[0].set_title('Pickup density [datapoints per sq mile]')
-cbar = fig.colorbar(im, ax=axs[0])
+fig = plt.figure(figsize=(18, 12))
+plt.imshow(nyc_map, zorder=0, extent=BB)
+im = plt.imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+plt.title('Pickup density [datapoints per sq mile]')
+cbar = fig.colorbar(im, shrink=.75)
 cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+plt.show()
 
-axs[1].imshow(nyc_map, zorder=0, extent=BB)
-im = axs[1].imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
-axs[1].set_title('Dropoff density [datapoints per sq mile]')
-cbar = fig.colorbar(im, ax=axs[1])
+fig = plt.figure(figsize=(18, 12))
+plt.imshow(nyc_map, zorder=0, extent=BB)
+im = plt.imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+plt.title('Dropoff density [datapoints per sq mile]')
+cbar = fig.colorbar(im, shrink=.75)
 cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
 plt.show()
