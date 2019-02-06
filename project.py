@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import math
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -18,12 +19,14 @@ from sklearn.metrics import mean_squared_error
 
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import cross_val_score
 
+# Question 1
 # df_fhv = pd.read_csv("./fhv_tripdata_2015-09.csv")
 df_green_raw = pd.read_csv("./green_tripdata_2015-09.csv")
-# df_green = df_green[:10000]
+print(df_green_raw.shape)
 # df_yellow = pd.read_csv("./yellow_tripdata_2015-09.csv")
 
 # think about how to get taxi zones to take into account which ones are near each other
@@ -83,6 +86,7 @@ df_green['Trip_day'] = timeFromStart.dt.days
 df_green['Trip_timeofday'] = timeFromStart_components.hours*60 + \
                              timeFromStart_components.minutes + \
                              timeFromStart_components.seconds/60
+df_green['Trip_tippercent'] = df_green.Tip_amount / df_green.Fare_amount
 
 
 def to_circle(k, n):
@@ -100,11 +104,12 @@ df_green_test = df_green[df_green.Trip_day >= 27]
 
 train_labels = ['Pickup_longitude_center', 'Dropoff_longitude_center',
                 'Pickup_latitude_center', 'Dropoff_latitude_center',
-                'Trip_dayofweek', 'Trip_total_time', 'Trip_day', 'Trip_timeofday',
+                'Trip_dayofweek', 'Trip_total_time', 'Trip_timeofday',
                 'VendorID', 'Store_and_fwd_flag', 'RateCodeID', 'Passenger_count',
                 'Trip_distance', 'Trip_timeofday_x', 'Trip_timeofday_y',
                 'Trip_dayofweek_x', 'Trip_dayofweek_y', 'Payment_type', 'Trip_type', 'Extra',
                 'MTA_tax']
+# removed Trip_day since it is inappropriate for this model
 df_train = df_green_train[train_labels]
 df_test = df_green_test[train_labels]
 y_train = df_green_train[['Fare_amount']].values.ravel()
@@ -132,7 +137,7 @@ cluster_transformer = Pipeline(steps=[
 ])
 
 # maybe remove Extra, MTA_tax (needs to be changed to binary), improvement_surcharge, Tolls_amount
-cat_features = ['Trip_dayofweek', 'Trip_day', 'VendorID', 'RateCodeID', 'Store_and_fwd_flag',
+cat_features = ['Trip_dayofweek', 'VendorID', 'RateCodeID', 'Store_and_fwd_flag',
                 'Payment_type', 'Trip_type']
 # cat_features = ['Trip_dayofweek', 'Trip_day', 'VendorID', 'RateCodeID', 'Store_and_fwd_flag',
 #                 'Payment_type', 'Extra', 'MTA_tax', 'improvement_surcharge',
@@ -155,9 +160,9 @@ preprocessor = ColumnTransformer(transformers=[
     # ('cluster', cluster_transformer, cluster_features)
 ])
 
-estimator = GradientBoostingRegressor(n_estimators=500, verbose=10, max_depth=15,
-                                      max_features='sqrt', min_samples_split=1000,
-                                      min_samples_leaf=50, learning_rate=0.1, random_state=0)
+# estimator = GradientBoostingRegressor(n_estimators=500, verbose=10, max_depth=15,
+#                                       max_features='sqrt', min_samples_split=1000,
+#                                       min_samples_leaf=50, learning_rate=0.1, random_state=0)
 # 4.61 RMSE for Fare_amount with num
 # 3.69 RMSE for Fare_amount with num, cat
 # 3.81 RMSE for Fare_amount with num, cat, clust
@@ -167,70 +172,164 @@ estimator = GradientBoostingRegressor(n_estimators=500, verbose=10, max_depth=15
 # 1.74 RMSE for Fare_amount with num, cat
 # 1.81 RMSE for Fare_amount with num, cat, clust
 
-pipeline = Pipeline([
-    ('preprocessor', preprocessor),
-    # ('TruncatedSVD', TruncatedSVD()),  # PCA()
-    # ('PCA', PCA()),
-    ('estimator', estimator)
-])
+# estimator = Pipeline(steps=[('TruncatedSVD', TruncatedSVD()),
+#                             ('Estimator', MLPRegressor(hidden_layer_sizes=(200, 100, 50,), verbose=10))])
+
 # print(cross_val_score(df_train, y_train, n_jobs=n_jobs, cv=5, verbose=10))
 
 
 # Hyperparameter Tuning
+estimator = Pipeline(steps=[('TruncatedSVD', TruncatedSVD()),
+                            ('Estimator', MLPRegressor(hidden_layer_sizes=(200, 100, 50,), verbose=10))])
+
+pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('estimator', estimator)
+])
+param_test = {'Estimator__hidden_layer_sizes': [(200, 100, 50,), (100, 50, 25,), (100, 10, 10, 10,)]}
+gsearch = GridSearchCV(estimator=estimator, param_grid=param_test, n_jobs=n_jobs, cv=5, verbose=10)
+gsearch.fit(df_train, y_train)
+print("best_params: ", gsearch.best_params_)
+print("best_score: ", gsearch.best_score_)
+
+estimator = GradientBoostingRegressor(n_estimators=500, verbose=10, max_depth=15,
+                                      max_features='sqrt', min_samples_split=1000,
+                                      min_samples_leaf=50, learning_rate=0.1, random_state=0)
 param_test = {'n_estimators': [10, 50, 100], 'max_features': [.3, .6, 1]}
 gsearch = GridSearchCV(estimator=estimator, param_grid=param_test, n_jobs=n_jobs, cv=5, verbose=10)
 gsearch.fit(df_train, y_train)
 print("best_params: ", gsearch.best_params_)
 print("best_score: ", gsearch.best_score_)
 
+estimator = RandomForestRegressor(n_estimators=10, n_jobs=n_jobs, verbose=10, random_state=0)
+param_test = {'n_estimators': [10, 50, 100], 'max_features': [.3, .6, 1]}
+gsearch = GridSearchCV(estimator=estimator, param_grid=param_test, n_jobs=n_jobs, cv=5, verbose=10)
+gsearch.fit(df_train, y_train)
+print("best_params: ", gsearch.best_params_)
+print("best_score: ", gsearch.best_score_)
 
 # Plotting
-BB = (-74.3, -73.7, 40.5, 40.9)
-nyc_map = plt.imread('https://aiblog.nl/download/nyc_-74.3_-73.7_40.5_40.9.png')
+# Question 2
+# sns.distplot(df_green_raw.Trip_distance)
+# plt.title('Trip Distance Histogram')
+# plt.show()
+# there are extreme outliers with the majority of the distribution between 1.1-3.74 with a max of 600 and a min of 0. it is odd that there are trips with 0 distance (maybe they wait on people and then eventually give up and go to another customer).
+
+# BB = (-74.3, -73.7, 40.5, 40.9)
+# nyc_map = plt.imread('https://aiblog.nl/download/nyc_-74.3_-73.7_40.5_40.9.png')
 
 
-def distance(lat1, lon1, lat2, lon2):
-    p = 0.017453292519943295
-    a = 0.5 - np.cos((lat2 - lat1) * p)/2 + np.cos(lat1 * p) * np.cos(lat2 * p) * (1 - np.cos((lon2 - lon1) * p)) / 2
-    return 0.6213712 * 12742 * np.arcsin(np.sqrt(a))
+# def distance(lat1, lon1, lat2, lon2):
+#     p = 0.017453292519943295
+#     a = 0.5 - np.cos((lat2 - lat1) * p)/2 + np.cos(lat1 * p) * np.cos(lat2 * p) * (1 - np.cos((lon2 - lon1) * p)) / 2
+#     return 0.6213712 * 12742 * np.arcsin(np.sqrt(a))
 
 
-n_lon, n_lat = 200, 200
-bins_lon = np.zeros(n_lon+1)
-bins_lat = np.zeros(n_lat+1)
-delta_lon = (BB[1]-BB[0]) / n_lon
-delta_lat = (BB[3]-BB[2]) / n_lat
-bin_width_miles = distance(BB[2], BB[1], BB[2], BB[0]) / n_lon
-bin_height_miles = distance(BB[3], BB[0], BB[2], BB[0]) / n_lat
-for i in range(n_lon+1):
-    bins_lon[i] = BB[0] + i * delta_lon
-for j in range(n_lat+1):
-    bins_lat[j] = BB[2] + j * delta_lat
+# n_lon, n_lat = 200, 200
+# bins_lon = np.zeros(n_lon+1)
+# bins_lat = np.zeros(n_lat+1)
+# delta_lon = (BB[1]-BB[0]) / n_lon
+# delta_lat = (BB[3]-BB[2]) / n_lat
+# bin_width_miles = distance(BB[2], BB[1], BB[2], BB[0]) / n_lon
+# bin_height_miles = distance(BB[3], BB[0], BB[2], BB[0]) / n_lat
+# for i in range(n_lon+1):
+#     bins_lon[i] = BB[0] + i * delta_lon
+# for j in range(n_lat+1):
+#     bins_lat[j] = BB[2] + j * delta_lat
 
-inds_pickup_lon = np.digitize(df_green.Pickup_longitude, bins_lon)
-inds_pickup_lat = np.digitize(df_green.Pickup_latitude, bins_lat)
-inds_dropoff_lon = np.digitize(df_green.Dropoff_longitude, bins_lon)
-inds_dropoff_lat = np.digitize(df_green.Dropoff_latitude, bins_lat)
+# inds_pickup_lon = np.digitize(df_green.Pickup_longitude, bins_lon)
+# inds_pickup_lat = np.digitize(df_green.Pickup_latitude, bins_lat)
+# inds_dropoff_lon = np.digitize(df_green.Dropoff_longitude, bins_lon)
+# inds_dropoff_lat = np.digitize(df_green.Dropoff_latitude, bins_lat)
 
-density_pickup, density_dropoff = np.zeros((n_lat, n_lon)), np.zeros((n_lat, n_lon))
-dxdy = bin_width_miles * bin_height_miles
-for i in range(n_lon):
-    for j in range(n_lat):
-        density_pickup[j, i] = np.sum((inds_pickup_lon == i+1) & (inds_pickup_lat == (n_lat-j))) / dxdy
-        density_dropoff[j, i] = np.sum((inds_dropoff_lon == i+1) & (inds_dropoff_lat == (n_lat-j))) / dxdy
+# density_pickup, density_dropoff = np.zeros((n_lat, n_lon)), np.zeros((n_lat, n_lon))
+# dxdy = bin_width_miles * bin_height_miles
+# for i in range(n_lon):
+#     for j in range(n_lat):
+#         density_pickup[j, i] = np.sum((inds_pickup_lon == i+1) & (inds_pickup_lat == (n_lat-j))) / dxdy
+#         density_dropoff[j, i] = np.sum((inds_dropoff_lon == i+1) & (inds_dropoff_lat == (n_lat-j))) / dxdy
 
-fig = plt.figure(figsize=(18, 12))
-plt.imshow(nyc_map, zorder=0, extent=BB)
-im = plt.imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
-plt.title('Pickup density [datapoints per sq mile]')
-cbar = fig.colorbar(im, shrink=.75)
-cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
-plt.show()
+# fig = plt.figure(figsize=(18, 12))
+# plt.imshow(nyc_map, zorder=0, extent=BB)
+# im = plt.imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+# plt.title('Pickup density [datapoints per sq mile]')
+# cbar = fig.colorbar(im, shrink=.75)
+# cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+# plt.show()
 
-fig = plt.figure(figsize=(18, 12))
-plt.imshow(nyc_map, zorder=0, extent=BB)
-im = plt.imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
-plt.title('Dropoff density [datapoints per sq mile]')
-cbar = fig.colorbar(im, shrink=.75)
-cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
-plt.show()
+# fig = plt.figure(figsize=(18, 12))
+# plt.imshow(nyc_map, zorder=0, extent=BB)
+# im = plt.imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+# plt.title('Dropoff density [datapoints per sq mile]')
+# cbar = fig.colorbar(im, shrink=.75)
+# cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+# plt.show()
+
+
+# Question 3
+# tmp = df_green
+# tmp['Trip_hour'] = timeFromStart_components.hours
+# print(tmp.groupby('Trip_hour').Trip_distance.mean())
+# print(tmp.groupby('Trip_hour').Trip_distance.median())
+
+# 40.6413° N, 73.7781° W JFK
+# 40.7769° N, 73.8740° W LaGuardia
+
+# def distance(lat1, lon1, lat2, lon2):
+#     p = 0.017453292519943295
+#     a = 0.5 - np.cos((lat2 - lat1) * p)/2 + np.cos(lat1 * p) * np.cos(lat2 * p) * (1 - np.cos((lon2 - lon1) * p)) / 2
+#     return 0.6213712 * 12742 * np.arcsin(np.sqrt(a))
+
+
+# d1 = distance(df_green.Pickup_latitude, df_green.Pickup_longitude, 40.6413, -73.7781)
+# d2 = distance(df_green.Dropoff_latitude, df_green.Dropoff_longitude, 40.6413, -73.7781)
+# d3 = distance(df_green.Pickup_latitude, df_green.Pickup_longitude, 40.7769, -73.8740)
+# d4 = distance(df_green.Dropoff_latitude, df_green.Dropoff_longitude, 40.7769, -73.8740)
+# dist_tol = 1
+# airport_bool = (d1 < dist_tol) | (d2 < dist_tol) | (d3 < dist_tol) | (d4 < dist_tol)
+# tmp['Trip_airport_bool'] = airport_bool
+# Airport_Trip_data = tmp[tmp.Trip_airport_bool]
+# print(Airport_Trip_data.Fare_amount.describe())
+# print(Airport_Trip_data.Trip_distance.describe())
+
+# BB = (-74.3, -73.7, 40.5, 40.9)
+# nyc_map = plt.imread('https://aiblog.nl/download/nyc_-74.3_-73.7_40.5_40.9.png')
+# n_lon, n_lat = 200, 200
+# bins_lon = np.zeros(n_lon+1)
+# bins_lat = np.zeros(n_lat+1)
+# delta_lon = (BB[1]-BB[0]) / n_lon
+# delta_lat = (BB[3]-BB[2]) / n_lat
+# bin_width_miles = distance(BB[2], BB[1], BB[2], BB[0]) / n_lon
+# bin_height_miles = distance(BB[3], BB[0], BB[2], BB[0]) / n_lat
+# for i in range(n_lon+1):
+#     bins_lon[i] = BB[0] + i * delta_lon
+# for j in range(n_lat+1):
+#     bins_lat[j] = BB[2] + j * delta_lat
+
+# inds_pickup_lon = np.digitize(Airport_Trip_data.Pickup_longitude, bins_lon)
+# inds_pickup_lat = np.digitize(Airport_Trip_data.Pickup_latitude, bins_lat)
+# inds_dropoff_lon = np.digitize(Airport_Trip_data.Dropoff_longitude, bins_lon)
+# inds_dropoff_lat = np.digitize(Airport_Trip_data.Dropoff_latitude, bins_lat)
+
+# density_pickup, density_dropoff = np.zeros((n_lat, n_lon)), np.zeros((n_lat, n_lon))
+# dxdy = bin_width_miles * bin_height_miles
+# for i in range(n_lon):
+#     for j in range(n_lat):
+#         density_pickup[j, i] = np.sum((inds_pickup_lon == i+1) & (inds_pickup_lat == (n_lat-j))) / dxdy
+#         density_dropoff[j, i] = np.sum((inds_dropoff_lon == i+1) & (inds_dropoff_lat == (n_lat-j))) / dxdy
+
+# fig = plt.figure(figsize=(18, 12))
+# plt.imshow(nyc_map, zorder=0, extent=BB)
+# im = plt.imshow(np.log1p(density_pickup), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+# plt.title('Pickup density [datapoints per sq mile]')
+# cbar = fig.colorbar(im, shrink=.75)
+# cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+# plt.show()
+
+# fig = plt.figure(figsize=(18, 12))
+# plt.imshow(nyc_map, zorder=0, extent=BB)
+# im = plt.imshow(np.log1p(density_dropoff), zorder=1, extent=BB, alpha=0.6, cmap='plasma')
+# plt.title('Dropoff density [datapoints per sq mile]')
+# cbar = fig.colorbar(im, shrink=.75)
+# cbar.set_label('log(1 + #datapoints per sq mile)', rotation=270)
+# plt.show()
