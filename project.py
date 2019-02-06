@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import math
-import matplotlib.pyplot as plt
-import seaborn as sns
+# import matplotlib.pyplot as plt
+# import seaborn as sns
 
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -26,7 +26,7 @@ from sklearn.model_selection import cross_val_score
 # Question 1
 # df_fhv = pd.read_csv("./fhv_tripdata_2015-09.csv")
 df_green_raw = pd.read_csv("./green_tripdata_2015-09.csv")
-print(df_green_raw.shape)
+# print(df_green_raw.shape)
 # df_yellow = pd.read_csv("./yellow_tripdata_2015-09.csv")
 
 # think about how to get taxi zones to take into account which ones are near each other
